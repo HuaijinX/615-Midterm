@@ -1,0 +1,342 @@
+---
+title: "midterm EDA report"
+format: html
+author: Huaijin Xin
+date: 2023-11-06
+editor: visual 
+---
+
+# Flood from 2020 to 2021 EDA report
+
+## Data
+
+The data is from NOAA data:
+
+[NOAA Storm Events Database](https://www.ncdc.noaa.gov/stormevents/ftp.jsp)
+
+And I choose Event Details Files :
+
+(StormEvents_details-ftp_v1.0_d2020_c20230927.csv) and
+
+(StormEvents_details-ftp_v1.0_d2021_c20231017.csv)
+
+to finish my investigation about flood details in 2020-2021
+
+<hr>
+
+## Clean Data
+
+### load two datasets: df_2020 and df_2021
+
+first 3 rows of df_2020
+
+```{r}
+#| echo: false
+df_2020 <- read.csv("StormEvents_details-ftp_v1.0_d2020_c20230927.csv")
+df_2021 <- read.csv("StormEvents_details-ftp_v1.0_d2021_c20231017.csv")
+head(df_2020,3)
+```
+
+first 3 rows of df_2021
+
+```{r}
+#| echo: false
+head(df_2021,3)
+```
+
+<hr>
+
+### choose only values which has EVENT_TYPE == Flood
+
+first 3 rows of df_2020
+
+```{r}
+#| echo: false
+library(dplyr)
+library(lubridate)
+df_2020 <- df_2020 %>%
+  filter(grepl("Flood", EVENT_TYPE, ignore.case = TRUE))
+df_2021 <- df_2021 %>%
+  filter(grepl("Flood", EVENT_TYPE, ignore.case = TRUE))
+head(df_2020,3)
+```
+
+first 3 rows of df_2021
+
+```{r}
+#| echo: false
+head(df_2021,3)
+```
+
+<hr>
+
+### Clean the columns which has most NA values and only constant values
+
+first 3 rows of df_2020
+
+```{r}
+#| echo: false
+cols_to_drop <- sapply(df_2020, function(x) sum(is.na(x))) > (length(df_2020) * 0.5)
+df_2020[cols_to_drop] <- NULL
+cols_to_drop2 <- sapply(df_2020, function(x) length(unique(x)) == 1)
+df_2020 <- df_2020[, !cols_to_drop2]
+
+cols_to_drop3 <- sapply(df_2021, function(x) sum(is.na(x))) > (length(df_2021) * 0.5)
+df_2021[cols_to_drop3] <- NULL
+cols_to_drop4 <- sapply(df_2021, function(x) length(unique(x)) == 1)
+df_2021 <- df_2021[, !cols_to_drop4]
+head(df_2020,3)
+```
+
+first3 rows of df_2021
+
+```{r}
+#| echo: false
+head(df_2021,3)
+```
+
+<hr>
+
+### Check if they have same column names now
+
+```{r}
+all(names(df_2020) == names(df_2021))
+```
+
+### Combine them
+
+```{r}
+#| echo: false
+df <- rbind(df_2020, df_2021)
+head(df,3)
+```
+
+<hr>
+
+### Make adjustment on Date of data, put them together into one column
+
+```{r}
+#| echo: false
+df$BEGIN_DATE <- as.Date(paste0(df$BEGIN_YEARMONTH, df$BEGIN_DAY), format = "%Y%m%d")
+df$BEGIN_YEARMONTH <- NULL
+df$BEGIN_DAY <- NULL
+head(df$BEGIN_DATE)
+```
+
+### Get column TOTAL_TIME_HOURS by columns BEGIN_DATE_TIME and END_DATE_TIME
+
+```{r}
+#| echo: false
+df$BEGIN_DATE_TIME <- as.POSIXct(df$BEGIN_DATE_TIME, format = "%d-%b-%y %H:%M:%S")
+df$END_DATE_TIME <- as.POSIXct(df$END_DATE_TIME, format = "%d-%b-%y %H:%M:%S")
+
+# Now, calculate the difference
+df$total_time <- df$END_DATE_TIME - df$BEGIN_DATE_TIME
+
+# The result is a difftime object. If you want it in hours, you can do:
+df$TOTAL_TIME_HOURS <- as.numeric(df$total_time, units = "hours")
+
+df <- df %>%
+  select(-BEGIN_DATE_TIME, -END_DATE_TIME,-total_time)
+
+head(df$TOTAL_TIME_HOURS)
+```
+
+### convert DAMAGED_PROPERTY into same scale
+
+```{r}
+#| echo: false
+convert_to_numeric <- function(value) {
+  value <- ifelse(value == "", "0", value)
+  
+  # Check for the presence of 'K' or 'M' and convert accordingly
+  if (grepl("K", value)) {
+    return(as.numeric(gsub("K", "", value)) * 1e3)
+  } else if (grepl("M", value)) {
+    return(as.numeric(gsub("M", "", value)) * 1e6)
+  } else {
+    return(as.numeric(value))
+  }
+}
+
+# Apply the function to the damaged_property column
+df$DAMAGE_PROPERTY <- sapply(df$DAMAGE_PROPERTY, convert_to_numeric)
+head(df$DAMAGE_PROPERTY)
+
+```
+
+### Same as DAMAGE_CROPS
+
+```{r}
+#| echo: false
+df$DAMAGE_CROPS <- sapply(df$DAMAGE_CROPS, convert_to_numeric)
+head(df$DAMAGE_CROPS)
+```
+
+### Delete unnecessary column and change values of some empty values:
+
+### empty values of FLOOD_CAUSE into unknown
+
+```{r}
+#| echo: false
+df<-df %>%
+  select(-BEGIN_TIME, -END_YEARMONTH, -END_DAY, -END_TIME, -MONTH_NAME, -SOURCE, -EVENT_ID,-EPISODE_ID, -EVENT_NARRATIVE, -EPISODE_NARRATIVE)
+df <- df %>%
+  mutate(FLOOD_CAUSE = replace(FLOOD_CAUSE, FLOOD_CAUSE == "" | is.na(FLOOD_CAUSE), "Unknown"))
+head(df)
+```
+
+<hr>
+
+## EDA PLOTS
+
+### 1.
+
+Firstly I want to know about the distribution of total time of flood by begin time of floods within 2 years.
+
+So I create a scatter plot :
+
+```{r}
+#| echo: false
+
+library(ggplot2)
+# Plot the scatter plot
+ggplot(df, aes(x=BEGIN_DATE, y=TOTAL_TIME_HOURS)) +
+  geom_point() +
+  xlab("Begin Date") +
+  ylab("Total time in Hours") +
+  ggtitle("Scatter Plot of Begin Dates") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  theme_classic()
+```
+
+It seems that the long-time flood frequently appear around first half of a year. However, there are lots of 0s or values near to 0 for total time in the data, lets get log of them and take a look again:
+
+```{r}
+#| echo: false
+ggplot(df, aes(x=BEGIN_DATE, y=log(1 + TOTAL_TIME_HOURS))) +
+  geom_point() +
+  xlab("Begin Date") +
+  ylab("Log of Total time in hours") + 
+  ggtitle("Scatter Plot of Begin Dates") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  theme_classic()
+  
+```
+
+It shows more clearly of floods which has short time. This also shows that most of floods takes short time rather than long time.
+
+<hr>
+
+### 2. 
+
+Then let us take a look at the location (States) of those floods by a heat map:
+
+```{r}
+#| echo: false
+library(maps)
+state_freq <- df %>%
+  group_by(STATE) %>%
+  summarise(count = n())
+
+# Get US states map data
+states_map <- map_data("state")
+states_map <- states_map %>%
+  mutate(region = toupper(region))
+
+state_centroids <- states_map %>%
+  group_by(region) %>%
+  summarise(long = mean(long), lat = mean(lat))
+
+# Merge the frequency data with the map data
+map_data_merged <- merge(states_map, state_freq, by.x = "region", by.y = "STATE", all.x = TRUE)
+
+# Replace NA with 0 for states with no occurrences
+map_data_merged$count[is.na(map_data_merged$count)] <- 0
+
+# Merge centroid data to add the state labels
+map_data_merged <- merge(map_data_merged, state_centroids, by = "region", all.x = TRUE)
+
+# Plot the heatmap
+ggplot(map_data_merged, aes(x = long.x, y = lat.x, group = group)) +
+  geom_polygon(aes(fill = count), color = "black",size = 0.25) +
+  geom_text(data = state_centroids, aes(label = region, x = long, y = lat, group = NULL), size = 3, check_overlap = TRUE) +
+  scale_fill_gradient(low = "white", high = "red", na.value = "white") +
+  expand_limits(x = states_map$long, y = states_map$lat) +
+  coord_fixed(1.3) +
+  labs(fill = "Frequency", title = "Heatmap of State Frequencies") +
+  theme_void()  # This removes axis labels and ticks
+```
+
+As we can see that the frequency of floods is obviously higher in the East than the West. And Virginia is the State that has most floods in those 2 years.
+
+<hr>
+
+### 3.
+
+Let's see the relationship between damage property and total time in hours by a scattered plot
+
+```{r}
+#| echo: false
+ggplot(df, aes(x=TOTAL_TIME_HOURS, y=log(1+DAMAGE_PROPERTY))) +
+  geom_point() +
+  xlab("Total time in hours") +
+  ylab("Damage property") + 
+  ggtitle("Scatter Plot of Damage Property and Total time in Hours") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  theme_classic()
+```
+
+It seems that there is no obvious relationship between Damage Property and Total time.
+
+<hr>
+
+### 4.
+
+I want to know the proportion of every causes so I create a pie chart to compare the porportion:
+
+```{r}
+#| echo: false
+cause_counts <- df %>%
+  group_by(FLOOD_CAUSE) %>%
+  summarise(frequency = n()) %>%
+  ungroup()
+
+# Create the pie chart
+ggplot(cause_counts, aes(x = "", y = frequency, fill = FLOOD_CAUSE)) +
+  labs(title = "Pie chart of Flood Causes")+
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar("y", start = 0) + # This creates the pie chart
+  theme_void() +
+  theme(legend.title = element_blank()) +
+  labs(fill = "Cause of Flood")
+
+```
+
+We can see that "Heavy rain" is the most possible causes of Flood. And Ice Jam is the least possible.
+
+<hr>
+
+### 5.
+
+I want to see which time zone has most floods and which time zone has least, so I made a bar plot to see distribution of frequency of rains by different timezone.
+
+```{r}
+#| echo: false
+zone_counts <- df %>%
+  group_by(CZ_TIMEZONE) %>%
+  summarise(frequency = n()) %>%
+  ungroup()
+
+
+ggplot(data = zone_counts, aes(x=reorder(CZ_TIMEZONE,desc (frequency)), y = frequency))+
+  geom_bar(stat = 'identity',color = "skyblue",fill = "skyblue")+
+  labs(title = "Frequency of different TimeZones",
+       x= "TimeZones" ,
+       y = "Frequency")+
+  theme_classic()+
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+  
+```
+
+We can see that EST-5 has most floods take place and EDT-4 has the least in these 2 years.
